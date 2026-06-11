@@ -131,27 +131,32 @@ function initMap() {
   const img = $("#mapImg");
   if (!vp || !img) return;
 
-  let scale = 1,
-    tx = 0,
-    ty = 0,
-    dragging = false,
-    sx = 0,
-    sy = 0;
+  let scale = 1, tx = 0, ty = 0;
+  let dragging = false, sx = 0, sy = 0;
+  let pinDragging = false;
+  let pinPos = { x: 0.5, y: 0.5 };
+
+  const pin = el("div", { class: "map-pin" });
+  vp.appendChild(pin);
+
+  const updatePin = () => {
+    if (!img.naturalWidth) return;
+    pin.style.left = (tx + pinPos.x * img.naturalWidth  * scale) + "px";
+    pin.style.top  = (ty + pinPos.y * img.naturalHeight * scale) + "px";
+  };
 
   const apply = () => {
     img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    updatePin();
   };
 
-  // Fit the whole map inside the viewport and center it. This is the
-  // default view and what "Reset" returns to. No-op while the panel is
-  // hidden (clientWidth 0) or the image hasn't loaded — it's re-called
-  // on tab:shown and on image load.
+  // Fit the whole map inside the viewport and center it. No-op while the
+  // panel is hidden (clientWidth 0) or the image hasn't loaded.
   const fitMap = () => {
-    const w = vp.clientWidth,
-      h = vp.clientHeight;
+    const w = vp.clientWidth, h = vp.clientHeight;
     if (!w || !h || !img.naturalWidth) return;
     scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
-    tx = (w - img.naturalWidth * scale) / 2;
+    tx = (w - img.naturalWidth  * scale) / 2;
     ty = (h - img.naturalHeight * scale) / 2;
     apply();
   };
@@ -161,43 +166,65 @@ function initMap() {
     apply();
   };
 
-  $("#mapZoomIn")?.addEventListener("click", () => zoom(1.25));
+  fetchState("mapPin").then((saved) => {
+    if (saved && typeof saved.x === "number") pinPos = saved;
+    updatePin();
+  });
+
+  // Pin drag intercepts before map drag
+  pin.addEventListener("mousedown", (e) => { pinDragging = true; e.stopPropagation(); });
+  pin.addEventListener("touchstart", (e) => { pinDragging = true; e.stopPropagation(); }, { passive: true });
+
+  const imageCoords = (clientX, clientY) => {
+    const r = vp.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (clientX - r.left - tx) / (scale * img.naturalWidth))),
+      y: Math.max(0, Math.min(1, (clientY - r.top  - ty) / (scale * img.naturalHeight))),
+    };
+  };
+
+  $("#mapZoomIn")?.addEventListener("click",  () => zoom(1.25));
   $("#mapZoomOut")?.addEventListener("click", () => zoom(0.8));
-  $("#mapReset")?.addEventListener("click", fitMap);
+  $("#mapReset")?.addEventListener("click",   fitMap);
 
-  vp.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      zoom(e.deltaY < 0 ? 1.1 : 0.9);
-    },
-    { passive: false }
-  );
+  vp.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    zoom(e.deltaY < 0 ? 1.1 : 0.9);
+  }, { passive: false });
 
-  const start = (x, y) => {
-    dragging = true;
-    sx = x - tx;
-    sy = y - ty;
-  };
-  const move = (x, y) => {
-    if (!dragging) return;
-    tx = x - sx;
-    ty = y - sy;
-    apply();
-  };
-  const end = () => {
-    dragging = false;
-  };
+  vp.addEventListener("mousedown", (e) => { dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; });
 
-  vp.addEventListener("mousedown", (e) => start(e.clientX, e.clientY));
-  window.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
-  window.addEventListener("mouseup", end);
-  vp.addEventListener("touchstart", (e) => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { passive: true });
-  vp.addEventListener("touchmove", (e) => { const t = e.touches[0]; move(t.clientX, t.clientY); }, { passive: true });
-  vp.addEventListener("touchend", end);
+  window.addEventListener("mousemove", (e) => {
+    if (pinDragging) {
+      pinPos = imageCoords(e.clientX, e.clientY);
+      updatePin();
+    } else if (dragging) {
+      tx = e.clientX - sx; ty = e.clientY - sy;
+      apply();
+    }
+  });
 
-  // Default to the full map: fit when the tab is shown, when the image
-  // finishes loading, and on resize.
+  window.addEventListener("mouseup", () => {
+    if (pinDragging) saveState("mapPin", pinPos);
+    dragging = false; pinDragging = false;
+  });
+
+  vp.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    dragging = true; sx = t.clientX - tx; sy = t.clientY - ty;
+  }, { passive: true });
+
+  window.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    if (pinDragging) { pinPos = imageCoords(t.clientX, t.clientY); updatePin(); }
+    else if (dragging) { tx = t.clientX - sx; ty = t.clientY - sy; apply(); }
+  }, { passive: true });
+
+  window.addEventListener("touchend", () => {
+    if (pinDragging) saveState("mapPin", pinPos);
+    dragging = false; pinDragging = false;
+  });
+
   document.addEventListener("tab:shown", (e) => { if (e.detail === "map") fitMap(); });
   if (img.complete) fitMap();
   else img.addEventListener("load", fitMap);
@@ -221,23 +248,99 @@ async function renderCharacter() {
   if (empty) empty.hidden = true;
   if (content) content.hidden = false;
 
-  // ─────────────────────────────────────────────────────────
-  // CLAUDE: render the character sheet here from `data`.
-  // `data` is the JSON seeded in migrations/0005_character_seed.js
-  // (app_state key 'character'). Build DOM into `content` with the
-  // el() helper + .kingdom-card / .k-* classes (see css/style.css).
-  // Show whatever the player's sheet has: stats, skills, weapons,
-  // abilities, equipment, backstory. Match the dark theme.
-  // ─────────────────────────────────────────────────────────
+  const sign = (n) => (n >= 0 ? "+" : "") + n;
+
+  const statCard = (label, a) =>
+    el("div", { class: "char-stat" },
+      el("div", { class: "char-stat-label" }, label),
+      el("div", { class: "char-stat-score" }, a.score),
+      el("div", { class: "char-stat-mod" }, sign(a.mod)),
+      el("div", { class: "char-stat-save" }, "Save " + sign(a.save))
+    );
+
+  const skillBlock = (label, group) =>
+    el("div", { class: "char-skill-group" },
+      el("div", { class: "char-skill-label" }, label),
+      ...Object.entries(group).map(([name, val]) =>
+        el("div", { class: "char-skill-row" },
+          el("span", {}, name),
+          el("span", { class: "char-skill-val" }, sign(val))
+        )
+      )
+    );
+
+  const { name, level, class: cls, subclass, background, fightingStyle,
+          origin, age, born, height, weight, ac, maxHp,
+          attributes: a, skills, abilities, backgroundAbilities,
+          equipment, inventory, backstory } = data;
+
   content.replaceChildren(
-    el("p", { class: "k-desc" }, "Character data loaded — Claude renders the full sheet here.")
+    el("div", { class: "char-header" },
+      el("div", { class: "char-name" }, name),
+      el("div", { class: "char-meta" }, `Level ${level} ${cls} (${subclass})  ·  ${background}  ·  ${fightingStyle} style`),
+      el("div", { class: "char-meta" }, `${origin}  ·  Age ${age} (born ${born})  ·  ${height},  ${weight}`),
+      el("div", { class: "char-tags" },
+        el("span", { class: "char-tag" }, `AC ${ac}`),
+        el("span", { class: "char-tag" }, `HP ${maxHp}`)
+      )
+    ),
+
+    el("h2", {}, "Attributes"),
+    el("div", { class: "char-stats" },
+      statCard("STR", a.str), statCard("DEX", a.dex), statCard("CON", a.con),
+      statCard("INT", a.int), statCard("WIS", a.wis), statCard("CHA", a.cha)
+    ),
+
+    el("h2", {}, "Skills"),
+    el("div", { class: "char-skills" },
+      skillBlock("Strength",     skills.str),
+      skillBlock("Dexterity",    skills.dex),
+      skillBlock("Intelligence", skills.int),
+      skillBlock("Wisdom",       skills.wis),
+      skillBlock("Charisma",     skills.cha)
+    ),
+
+    el("h2", {}, "Abilities"),
+    el("div", { class: "char-abilities" },
+      ...abilities.map(ab =>
+        el("div", { class: "kingdom-card" },
+          el("div", { class: "k-name" }, ab.name),
+          el("div", { class: "k-desc" }, ab.desc)
+        )
+      )
+    ),
+
+    el("h2", {}, "Background Abilities"),
+    el("div", { class: "kingdom-card" },
+      el("div", { class: "k-name" }, "Knight of the Order — Grand Strategy"),
+      el("ul", { class: "char-list" },
+        ...backgroundAbilities.map(b => el("li", {}, b))
+      )
+    ),
+
+    el("h2", {}, "Equipment & Inventory"),
+    el("div", { class: "char-two-col" },
+      el("div", { class: "kingdom-card" },
+        el("div", { class: "k-name" }, "Equipment"),
+        el("ul", { class: "char-list" }, ...equipment.map(e => el("li", {}, e)))
+      ),
+      el("div", { class: "kingdom-card" },
+        el("div", { class: "k-name" }, "Inventory"),
+        el("ul", { class: "char-list" }, ...inventory.map(i => el("li", {}, i)))
+      )
+    ),
+
+    el("h2", {}, "Backstory"),
+    el("div", { class: "kingdom-card" },
+      el("p", { class: "k-desc", style: "margin:0" }, backstory)
+    )
   );
 }
 
 async function renderTracker() {
   const empty = $("#tracker-empty");
   const content = $("#tracker-content");
-  const data = await fetchState("tracker");
+  let data = await fetchState("tracker");
 
   if (!data) {
     if (empty) empty.hidden = false;
@@ -247,18 +350,58 @@ async function renderTracker() {
   if (empty) empty.hidden = true;
   if (content) content.hidden = false;
 
-  // ─────────────────────────────────────────────────────────
-  // CLAUDE: render the live play tracker here from `data`
-  // (app_state key 'tracker'). Build controls for whatever the
-  // character tracks mid-session — current HP, conditions,
-  // resource/ability uses, a notes box, etc. Persist edits with:
-  //   const next = { ...data, hp: 24 };
-  //   await saveState('tracker', next);
-  // Don't assume Caeto's resources (Ring/Budget) — use the
-  // player's own sheet to decide what to track.
-  // ─────────────────────────────────────────────────────────
+  const save = async (next) => { data = next; await saveState("tracker", next); };
+
+  const hpDisplay = el("span", { class: "hp-current" }, data.hp);
+  const hpCard = el("div", { class: "kingdom-card tracker-card" },
+    el("div", { class: "k-name" }, "Hit Points"),
+    el("div", { class: "hp-row" },
+      el("button", { class: "btn hp-btn", onclick: async () => {
+        const next = { ...data, hp: Math.max(0, data.hp - 1) };
+        hpDisplay.textContent = next.hp;
+        await save(next);
+      }}, "−"),
+      hpDisplay,
+      el("span", { class: "hp-max" }, `/ ${data.maxHp}`),
+      el("button", { class: "btn hp-btn", onclick: async () => {
+        const next = { ...data, hp: Math.min(data.maxHp, data.hp + 1) };
+        hpDisplay.textContent = next.hp;
+        await save(next);
+      }}, "+")
+    )
+  );
+
+  const abilityCard = (title, subtitle, key) => {
+    const btn = el("button", { class: "btn ability-toggle" + (data[key] ? " used" : "") },
+      data[key] ? "Used" : "Available");
+    btn.addEventListener("click", async () => {
+      const next = { ...data, [key]: !data[key] };
+      btn.className = "btn ability-toggle" + (next[key] ? " used" : "");
+      btn.textContent = next[key] ? "Used" : "Available";
+      await save(next);
+    });
+    return el("div", { class: "kingdom-card tracker-card" },
+      el("div", { class: "k-name" }, title),
+      el("div", { class: "k-desc" }, subtitle),
+      btn
+    );
+  };
+
+  let noteTimer;
+  const notesEl = el("textarea", { class: "tracker-notes", placeholder: "Notes…" });
+  notesEl.value = data.notes || "";
+  notesEl.addEventListener("input", () => {
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => save({ ...data, notes: notesEl.value }), 800);
+  });
+
   content.replaceChildren(
-    el("p", { class: "k-desc" }, "Tracker data loaded — Claude renders the controls here.")
+    el("div", { class: "tracker-grid" },
+      hpCard,
+      abilityCard("Second Wind", "Bonus action · 1d10+4 HP · Short rest", "secondWind"),
+      abilityCard("Action Surge", "Extra action · Short rest", "actionSurge")
+    ),
+    el("div", { class: "tracker-notes-wrap" }, notesEl)
   );
 }
 

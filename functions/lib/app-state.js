@@ -14,6 +14,7 @@ const ALLOWED_KEYS = new Set([
   'kingdomFilter',
   'character',
   'tracker',
+  'mapPin',
 ]);
 
 export function validateKey(key) {
