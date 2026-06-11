@@ -149,15 +149,15 @@ h2 { font-size: 1.05rem; margin: 24px 0 12px; color: var(--accent); letter-spaci
 .map-container {
   position: relative;
   width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
   user-select: none;
 }
 .map-container img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 65vh;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   -webkit-user-drag: none;
 }
 .btn {
