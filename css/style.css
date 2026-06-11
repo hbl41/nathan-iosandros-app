@@ -144,22 +144,20 @@ h2 { font-size: 1.05rem; margin: 24px 0 12px; }
 .t-body { font-size: 0.9rem; }
 
 /* ---------- map ---------- */
-.map-viewport {
+.map-container {
+  position: relative;
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  height: 70vh;
-  background: #f0f0f0;
-  cursor: grab;
-  touch-action: none;
-}
-.map-viewport img {
-  transform-origin: 0 0;
-  max-width: none;
   user-select: none;
+}
+.map-container img {
+  display: block;
+  width: 100%;
+  height: auto;
   -webkit-user-drag: none;
 }
-.map-controls { display: flex; gap: 8px; margin-top: 10px; }
 .btn {
   background: var(--card);
   color: var(--text);
@@ -174,7 +172,6 @@ h2 { font-size: 1.05rem; margin: 24px 0 12px; }
 .map-hint { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
 
 /* ---------- map pin ---------- */
-.map-viewport { position: relative; }
 .map-pin {
   position: absolute;
   width: 18px;

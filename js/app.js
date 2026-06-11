@@ -127,43 +127,19 @@ function renderHistory() {
 }
 
 function initMap() {
-  const vp = $("#mapViewport");
+  const container = $("#mapContainer");
   const img = $("#mapImg");
-  if (!vp || !img) return;
+  if (!container || !img) return;
 
-  let scale = 1, tx = 0, ty = 0;
-  let dragging = false, sx = 0, sy = 0;
-  let pinDragging = false;
   let pinPos = { x: 0.5, y: 0.5 };
+  let pinDragging = false;
 
   const pin = el("div", { class: "map-pin" });
-  vp.appendChild(pin);
+  container.appendChild(pin);
 
   const updatePin = () => {
-    if (!img.naturalWidth) return;
-    pin.style.left = (tx + pinPos.x * img.naturalWidth  * scale) + "px";
-    pin.style.top  = (ty + pinPos.y * img.naturalHeight * scale) + "px";
-  };
-
-  const apply = () => {
-    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-    updatePin();
-  };
-
-  // Fit the whole map inside the viewport and center it. No-op while the
-  // panel is hidden (clientWidth 0) or the image hasn't loaded.
-  const fitMap = () => {
-    const w = vp.clientWidth, h = vp.clientHeight;
-    if (!w || !h || !img.naturalWidth) return;
-    scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
-    tx = (w - img.naturalWidth  * scale) / 2;
-    ty = (h - img.naturalHeight * scale) / 2;
-    apply();
-  };
-
-  const zoom = (factor) => {
-    scale = Math.max(0.05, Math.min(8, scale * factor));
-    apply();
+    pin.style.left = (pinPos.x * 100) + "%";
+    pin.style.top  = (pinPos.y * 100) + "%";
   };
 
   fetchState("mapPin").then((saved) => {
@@ -171,64 +147,41 @@ function initMap() {
     updatePin();
   });
 
-  // Pin drag intercepts before map drag
-  pin.addEventListener("mousedown", (e) => { pinDragging = true; e.stopPropagation(); });
-  pin.addEventListener("touchstart", (e) => { pinDragging = true; e.stopPropagation(); }, { passive: true });
+  updatePin();
 
-  const imageCoords = (clientX, clientY) => {
-    const r = vp.getBoundingClientRect();
+  const getPos = (clientX, clientY) => {
+    const r = container.getBoundingClientRect();
     return {
-      x: Math.max(0, Math.min(1, (clientX - r.left - tx) / (scale * img.naturalWidth))),
-      y: Math.max(0, Math.min(1, (clientY - r.top  - ty) / (scale * img.naturalHeight))),
+      x: Math.max(0, Math.min(1, (clientX - r.left) / r.width)),
+      y: Math.max(0, Math.min(1, (clientY - r.top)  / r.height)),
     };
   };
 
-  $("#mapZoomIn")?.addEventListener("click",  () => zoom(1.25));
-  $("#mapZoomOut")?.addEventListener("click", () => zoom(0.8));
-  $("#mapReset")?.addEventListener("click",   fitMap);
-
-  vp.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    zoom(e.deltaY < 0 ? 1.1 : 0.9);
-  }, { passive: false });
-
-  vp.addEventListener("mousedown", (e) => { dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; });
+  pin.addEventListener("mousedown",  (e) => { pinDragging = true; e.preventDefault(); });
+  pin.addEventListener("touchstart", (e) => { pinDragging = true; }, { passive: true });
 
   window.addEventListener("mousemove", (e) => {
-    if (pinDragging) {
-      pinPos = imageCoords(e.clientX, e.clientY);
-      updatePin();
-    } else if (dragging) {
-      tx = e.clientX - sx; ty = e.clientY - sy;
-      apply();
-    }
+    if (!pinDragging) return;
+    pinPos = getPos(e.clientX, e.clientY);
+    updatePin();
   });
 
   window.addEventListener("mouseup", () => {
     if (pinDragging) saveState("mapPin", pinPos);
-    dragging = false; pinDragging = false;
+    pinDragging = false;
   });
 
-  vp.addEventListener("touchstart", (e) => {
-    const t = e.touches[0];
-    dragging = true; sx = t.clientX - tx; sy = t.clientY - ty;
-  }, { passive: true });
-
   window.addEventListener("touchmove", (e) => {
+    if (!pinDragging) return;
     const t = e.touches[0];
-    if (pinDragging) { pinPos = imageCoords(t.clientX, t.clientY); updatePin(); }
-    else if (dragging) { tx = t.clientX - sx; ty = t.clientY - sy; apply(); }
+    pinPos = getPos(t.clientX, t.clientY);
+    updatePin();
   }, { passive: true });
 
   window.addEventListener("touchend", () => {
     if (pinDragging) saveState("mapPin", pinPos);
-    dragging = false; pinDragging = false;
+    pinDragging = false;
   });
-
-  document.addEventListener("tab:shown", (e) => { if (e.detail === "map") fitMap(); });
-  if (img.complete) fitMap();
-  else img.addEventListener("load", fitMap);
-  window.addEventListener("resize", fitMap);
 }
 
 // ============================================================
