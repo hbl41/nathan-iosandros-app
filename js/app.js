@@ -235,10 +235,10 @@ function initMap() {
 //  PERSONAL PAGES (Claude fills these in per character)
 // ============================================================
 
-async function renderCharacter() {
+function renderCharacter() {
   const empty = $("#character-empty");
   const content = $("#character-content");
-  const data = await fetchState("character");
+  const data = window.CHARACTER;
 
   if (!data) {
     if (empty) empty.hidden = false;
